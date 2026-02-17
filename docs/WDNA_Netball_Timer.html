@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- 
+    Netball Game Timer
+    (c) 2026 Mike Harris harmic@gmail.com 
+-->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netball Game Timer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root { --primary-color: #003366; --accent-color: #aa1334; --edit-bg: #fffcf0; --calc-bg: #f1f3f5; }
+        body { background-color: #f8f9fa; font-family: sans-serif; overflow-x: hidden; }
+        
+        /* Updated Header Styling */
+        .header-bar { 
+            background: white; 
+            color: black; 
+            padding: 0.5rem 1rem; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between;
+            border-bottom: 5px solid var(--accent-color);
+        }
+        .logo-container img {
+            height: 64px; /* Approx 70% of original 91px height */
+            width: auto;
+        }
+        
+        /* Redesigned Status Bar */
+        .status-bar { 
+            background: #222; 
+            color: #00ff00; 
+            padding: 1rem 2rem; 
+            border-bottom: 4px solid #444; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            font-size: 2.5rem; 
+            font-weight: bold;
+            font-family: monospace;
+        }
+        .status-left { flex: 0 0 auto; }
+        .status-right { flex: 1 1 auto; text-align: right; text-transform: uppercase; letter-spacing: 1px; }
+
+        .table-container { padding: 20px; overflow-x: auto; }
+        table { table-layout: fixed; width: 100%; min-width: 1200px; }
+        
+        /* Column Widths */
+        th:nth-child(1) { width: 40px; }
+        th:nth-child(n+2):nth-child(-n+7) { width: 85px; } /* Editable columns */
+        th:nth-child(n+8):nth-child(-n+15) { width: 70px; } /* Calculated columns */
+        th:nth-child(16) { width: 50px; }
+
+        .editable { 
+            background-color: var(--edit-bg) !important; 
+            cursor: text; 
+            border: 1px solid #ffe066 !important;
+            font-weight: 500;
+            padding: 0 !important;
+            position: relative;
+        }
+        .editable:hover { background-color: #fff3bf !important; }
+        .calculated { 
+            background-color: var(--calc-bg) !important; 
+            color: #6c757d; 
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        /* Next Event Highlighting */
+        .next-event-highlight {
+            background-color: #fd7e14 !important;
+            color: white !important;
+            font-weight: bold !important;
+            font-style: normal !important;
+            animation: pulse-highlight 2s infinite;
+        }
+
+        @keyframes pulse-highlight {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        input.cell-edit { 
+            width: 100%; 
+            height: 100%;
+            border: 2px solid #228be6; 
+            background: white; 
+            text-align: center; 
+            font-weight: bold; 
+            outline: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+        .btn-siren { background-color: #e03131; color: white; }
+    </style>
+</head>
+<body>
+
+    <header class="header-bar">
+        <div class="d-flex align-items-center">
+            <div class="logo-container"><img src="wdna-logo.jpg" alt="WDNA Logo"></div>
+            <h1 class="h4 mb-0 ms-3">WDNA Game Timer</h1>
+        </div>
+        <button class="btn btn-outline-dark btn-sm" onclick="openConfig()"><i data-lucide="settings"></i></button>
+    </header>
+
+    <nav class="p-2 bg-light border-bottom d-flex gap-2 align-items-center">
+        <button class="btn btn-success" onclick="startTimer()">Start</button>
+        <button class="btn btn-danger" onclick="stopTimer()">Stop</button>
+        <button class="btn btn-siren ms-auto" onclick="manualSiren()">Siren</button>
+    </nav>
+
+    <div class="status-bar" id="statusBar">
+        <div class="status-left" id="clockLayer">00:00:00</div>
+        <div class="status-right" id="eventLayer">READY</div>
+    </div>
+
+    <div class="table-container">
+        <table class="table table-bordered table-sm align-middle text-center" id="roundTable">
+            <thead class="table-dark">
+                <tr>
+                    <th>Round #</th>
+                    <th>Start Time</th>
+                    <th>Qtr Duration</th>
+                    <th>Q1 Break</th>
+                    <th>Q2 Break</th>
+                    <th>Q3 Break</th>
+                    <th>Interval</th>
+                    <th>Start Q1</th>
+                    <th>End Q1</th>
+                    <th>Start Q2</th>
+                    <th>End Q2</th>
+                    <th>Start Q3</th>
+                    <th>End Q3</th>
+                    <th>Start Q4</th>
+                    <th>End Q4</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+        <div class="mt-2">
+            <button class="btn btn-outline-primary btn-sm" onclick="addRound()">+ Add Next Round</button>
+            <button class="btn btn-outline-secondary btn-sm ms-2" onclick="clearSchedule()">Clear Schedule</button>
+        </div>
+    </div>
+
+    <audio id="sndWarning" src="30sec_warning.mp3"></audio>
+    <audio id="sndStart" src="qtr_start.mp3"></audio>
+    <audio id="sndEnd" src="qtr_end.mp3"></audio>
+    <audio id="sndSiren" src="siren.mp3"></audio>
+
+    <script>
+        let rounds = [];
+        let isRunning = false;
+        let nextEventTarget = null; // Stores {roundIdx, fieldKey}
+        let wakeLock = null; // Screen Wake Lock handle
+        const EDITABLE_FIELDS = ['startTime', 'qtrDur', 'q1Brk', 'q2Brk', 'q3Brk', 'interBrk'];
+        const STORAGE_KEY = 'netball_timer_schedule';
+
+        const DEFAULTS = {
+            startTime: "09:00",
+            qtrDur: "07:00",
+            q1Brk: "01:00",
+            q2Brk: "02:00",
+            q3Brk: "01:00",
+            interBrk: "2:00"
+        };
+
+        function init() {
+            loadSchedule();
+            if (rounds.length === 0) {
+                addRound();
+            }
+            setInterval(tick, 1000);
+            lucide.createIcons();
+
+            // Prevention for tab closing
+            window.addEventListener('beforeunload', (e) => {
+                if (isRunning) {
+                    e.preventDefault();
+                    e.returnValue = ''; // Standard requirement for modern browsers to show the prompt
+                }
+            });
+
+            // Re-acquire Wake Lock if tab becomes visible again
+            document.addEventListener('visibilitychange', async () => {
+                if (wakeLock !== null && document.visibilityState === 'visible' && isRunning) {
+                    await requestWakeLock();
+                }
+            });
+        }
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {
+                console.error(`${err.name}, ${err.message}`);
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock !== null) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                });
+            }
+        }
+
+        function saveSchedule() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(rounds));
+        }
+
+        function loadSchedule() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    rounds = JSON.parse(saved);
+                    recalculateAll();
+                } catch (e) {
+                    console.error("Failed to load schedule", e);
+                    rounds = [];
+                }
+            }
+        }
+
+        function clearSchedule() {
+            if (confirm("Clear entire schedule?")) {
+                rounds = [];
+                localStorage.removeItem(STORAGE_KEY);
+                addRound();
+            }
+        }
+
+        function tick() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+            document.getElementById('clockLayer').innerText = timeStr;
+            
+            if (!isRunning) {
+                document.getElementById('eventLayer').innerText = "STOPPED";
+                if (nextEventTarget) {
+                    nextEventTarget = null;
+                    render();
+                }
+                return;
+            }
+            updateLogic(now);
+        }
+
+        function updateLogic(now) {
+            let nextEvent = null;
+            let currentTarget = null;
+            const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+            for (let i = 0; i < rounds.length; i++) {
+                const round = rounds[i];
+                const timeline = [
+                    { n: `R${round.id} Q1`, t: round.s1, type: 'start', field: 's1' },
+                    { n: `R${round.id} End Q1`, t: round.e1, type: 'end', field: 'e1' },
+                    { n: `R${round.id} Q2`, t: round.s2, type: 'start', field: 's2' },
+                    { n: `R${round.id} End Q2`, t: round.e2, type: 'end', field: 'e2' },
+                    { n: `R${round.id} Q3`, t: round.s3, type: 'start', field: 's3' },
+                    { n: `R${round.id} End Q3`, t: round.e3, type: 'end', field: 'e3' },
+                    { n: `R${round.id} Q4`, t: round.s4, type: 'start', field: 's4' },
+                    { n: `R${round.id} End Q4`, t: round.e4, type: 'end', field: 'e4' }
+                ];
+
+                for (let ev of timeline) {
+                    const evSec = timeToSeconds(ev.t);
+                    const diff = evSec - currentSeconds;
+                    
+                    if (diff === 30 && ev.type === 'start') playSound('sndWarning');
+                    if (diff === 0) playSound(ev.type === 'start' ? 'sndStart' : 'sndEnd');
+                    
+                    if (diff > 0) {
+                        nextEvent = { name: ev.n, diff: diff };
+                        currentTarget = { roundIdx: i, field: ev.field };
+                        break;
+                    }
+                }
+                if (nextEvent) break;
+            }
+
+            // Update highlighting if target changed
+            if (JSON.stringify(currentTarget) !== JSON.stringify(nextEventTarget)) {
+                nextEventTarget = currentTarget;
+                render();
+            }
+
+            document.getElementById('eventLayer').innerText = nextEvent 
+                ? `${nextEvent.name}: ${formatDuration(nextEvent.diff)}`
+                : "ALL GAMES FINISHED";
+        }
+
+        function addRound() {
+            let start = DEFAULTS.startTime;
+            let qtrDur = DEFAULTS.qtrDur;
+            let q1Brk = DEFAULTS.q1Brk;
+            let q2Brk = DEFAULTS.q2Brk;
+            let q3Brk = DEFAULTS.q3Brk;
+            let interBrk = DEFAULTS.interBrk;
+
+            if (rounds.length > 0) {
+                const last = rounds[rounds.length - 1];
+                start = secondsToTime(timeToSeconds(last.e4) + durToSeconds(last.interBrk));
+                qtrDur = last.qtrDur;
+                q1Brk = last.q1Brk;
+                q2Brk = last.q2Brk;
+                q3Brk = last.q3Brk;
+                interBrk = last.interBrk;
+            }
+
+            rounds.push({ 
+                id: rounds.length + 1, 
+                startTime: start, 
+                qtrDur, q1Brk, q2Brk, q3Brk, interBrk 
+            });
+            recalculateAll();
+        }
+
+        function recalculateAll() {
+            rounds.forEach((r, i) => {
+                if (i > 0) {
+                    const prev = rounds[i-1];
+                    r.startTime = secondsToTime(timeToSeconds(prev.e4) + durToSeconds(prev.interBrk));
+                }
+                const s1 = timeToSeconds(r.startTime);
+                const d = durToSeconds(r.qtrDur);
+                const b1 = durToSeconds(r.q1Brk);
+                const b2 = durToSeconds(r.q2Brk);
+                const b3 = durToSeconds(r.q3Brk);
+
+                r.s1 = secondsToTime(s1);
+                r.e1 = secondsToTime(s1 + d);
+                r.s2 = secondsToTime(s1 + d + b1);
+                r.e2 = secondsToTime(s1 + d*2 + b1);
+                r.s3 = secondsToTime(s1 + d*2 + b1 + b2);
+                r.e3 = secondsToTime(s1 + d*3 + b1 + b2);
+                r.s4 = secondsToTime(s1 + d*3 + b1 + b2 + b3);
+                r.e4 = secondsToTime(s1 + d*4 + b1 + b2 + b3);
+            });
+            saveSchedule();
+            render();
+        }
+
+        function render() {
+            const body = document.getElementById('tableBody');
+            body.innerHTML = rounds.map((r, i) => {
+                const isTargetRow = nextEventTarget && nextEventTarget.roundIdx === i;
+                
+                const getHighlightClass = (field) => {
+                    return (isTargetRow && nextEventTarget.field === field) ? 'next-event-highlight' : '';
+                };
+
+                return `
+                <tr>
+                    <td>${r.id}</td>
+                    ${EDITABLE_FIELDS.map(f => `<td class="editable" onclick="edit(${i}, '${f}')" data-idx="${i}" data-field="${f}">${r[f]}</td>`).join('')}
+                    <td class="calculated ${getHighlightClass('s1')}">${r.s1}</td>
+                    <td class="calculated ${getHighlightClass('e1')}">${r.e1}</td>
+                    <td class="calculated ${getHighlightClass('s2')}">${r.s2}</td>
+                    <td class="calculated ${getHighlightClass('e2')}">${r.e2}</td>
+                    <td class="calculated ${getHighlightClass('s3')}">${r.s3}</td>
+                    <td class="calculated ${getHighlightClass('e3')}">${r.e3}</td>
+                    <td class="calculated ${getHighlightClass('s4')}">${r.s4}</td>
+                    <td class="calculated ${getHighlightClass('e4')}">${r.e4}</td>
+                    <td><button class="btn btn-link text-danger p-0" onclick="del(${i})"><i data-lucide="x-circle"></i></button></td>
+                </tr>
+            `}).join('');
+            lucide.createIcons();
+        }
+
+        function edit(idx, field) {
+            const cell = event.currentTarget;
+            if (cell.querySelector('input')) return;
+
+            const oldVal = rounds[idx][field];
+            cell.innerHTML = `<input type="text" class="cell-edit" value="${oldVal}" id="active-edit">`;
+            const input = document.getElementById('active-edit');
+            input.select();
+
+            const saveAndExit = () => {
+                const newVal = formatInput(input.value, field);
+                rounds[idx][field] = newVal;
+                recalculateAll();
+            };
+
+            input.onblur = saveAndExit;
+
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter') {
+                    input.blur();
+                } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    saveAndExit();
+                    
+                    const fieldIdx = EDITABLE_FIELDS.indexOf(field);
+                    
+                    if (e.shiftKey) {
+                        if (fieldIdx > 0) {
+                            setTimeout(() => {
+                                const prevCell = document.querySelector(`td[data-idx="${idx}"][data-field="${EDITABLE_FIELDS[fieldIdx-1]}"]`);
+                                if (prevCell) prevCell.click();
+                            }, 10);
+                        } else if (idx > 0) {
+                            setTimeout(() => {
+                                const prevCell = document.querySelector(`td[data-idx="${idx-1}"][data-field="${EDITABLE_FIELDS[EDITABLE_FIELDS.length-1]}"]`);
+                                if (prevCell) prevCell.click();
+                            }, 10);
+                        }
+                    } else {
+                        if (fieldIdx < EDITABLE_FIELDS.length - 1) {
+                            setTimeout(() => {
+                                const nextCell = document.querySelector(`td[data-idx="${idx}"][data-field="${EDITABLE_FIELDS[fieldIdx+1]}"]`);
+                                if (nextCell) nextCell.click();
+                            }, 10);
+                        } else if (idx < rounds.length - 1) {
+                            setTimeout(() => {
+                                const nextCell = document.querySelector(`td[data-idx="${idx+1}"][data-field="${EDITABLE_FIELDS[0]}"]`);
+                                if (nextCell) nextCell.click();
+                            }, 10);
+                        } else {
+                            addRound();
+                            setTimeout(() => {
+                                const nextCell = document.querySelector(`td[data-idx="${idx+1}"][data-field="${EDITABLE_FIELDS[0]}"]`);
+                                if (nextCell) nextCell.click();
+                            }, 20);
+                        }
+                    }
+                }
+            };
+        }
+
+        function formatInput(v, f) {
+            if (!v.includes(':') && v.trim() !== "") {
+                const num = parseInt(v) || 0;
+                return num.toString().padStart(2, '0') + ":00";
+            }
+            return v;
+        }
+
+        function timeToSeconds(t) { const [h, m] = t.split(':').map(Number); return h*3600 + m*60; }
+        function durToSeconds(d) { const [m, s] = d.split(':').map(Number); return m*60 + (s||0); }
+        function secondsToTime(s) { 
+            const h = Math.floor(s/3600) % 24; 
+            const m = Math.floor((s%3600)/60); 
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+        function formatDuration(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
+        
+        function del(i) { 
+            if (confirm("Delete this round?")) {
+                rounds.splice(i, 1); 
+                rounds.forEach((r,idx)=>r.id=idx+1); 
+                recalculateAll(); 
+            }
+        }
+        
+        function startTimer() { 
+            isRunning = true; 
+            requestWakeLock();
+        }
+
+        function stopTimer() { 
+            isRunning = false; 
+            nextEventTarget = null;
+            releaseWakeLock();
+            render();
+        }
+
+        function playSound(id) { const a = document.getElementById(id); if(a) { a.currentTime = 0; a.play().catch(()=>{}); } }
+        function manualSiren() { if(confirm("Are you sure you want to sound the siren?")) playSound('sndSiren'); }
+        function openConfig() { alert("Configuration settings for sound and visuals."); }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
