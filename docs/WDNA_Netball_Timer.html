@@ -46,14 +46,8 @@
         .status-right { flex: 1 1 auto; text-align: right; text-transform: uppercase; letter-spacing: 1px; }
 
         .table-container { padding: 20px; overflow-x: auto; }
-        table { table-layout: fixed; width: 100%; min-width: 1200px; }
+        table { table-layout: fixed; width: 100%; }
         
-        /* Column Widths */
-        th:nth-child(1) { width: 40px; }
-        th:nth-child(n+2):nth-child(-n+7) { width: 85px; } /* Editable columns */
-        th:nth-child(n+8):nth-child(-n+15) { width: 70px; } /* Calculated columns */
-        th:nth-child(16) { width: 50px; }
-
         .editable { 
             background-color: var(--edit-bg) !important; 
             cursor: text; 
@@ -114,7 +108,11 @@
     <nav class="p-2 bg-light border-bottom d-flex gap-2 align-items-center">
         <button class="btn btn-success" onclick="startTimer()">Start</button>
         <button class="btn btn-danger" onclick="stopTimer()">Stop</button>
-        <button class="btn btn-siren ms-auto" onclick="manualSiren()">Siren</button>
+        <select id="periodSelect" class="form-select w-auto ms-auto" onchange="handlePeriodChange()">
+            <option value="4">4 Quarters</option>
+            <option value="2">2 Halves</option>
+        </select>
+        <button class="btn btn-siren" onclick="manualSiren()">Siren</button>
     </nav>
 
     <div class="status-bar" id="statusBar">
@@ -125,24 +123,7 @@
     <div class="table-container">
         <table class="table table-bordered table-sm align-middle text-center" id="roundTable">
             <thead class="table-dark">
-                <tr>
-                    <th>Round #</th>
-                    <th>Start Time</th>
-                    <th>Qtr Duration</th>
-                    <th>Q1 Break</th>
-                    <th>Q2 Break</th>
-                    <th>Q3 Break</th>
-                    <th>Interval</th>
-                    <th>Start Q1</th>
-                    <th>End Q1</th>
-                    <th>Start Q2</th>
-                    <th>End Q2</th>
-                    <th>Start Q3</th>
-                    <th>End Q3</th>
-                    <th>Start Q4</th>
-                    <th>End Q4</th>
-                    <th></th>
-                </tr>
+                <!-- Dynamically populated -->
             </thead>
             <tbody id="tableBody"></tbody>
         </table>
@@ -162,19 +143,26 @@
         let isRunning = false;
         let nextEventTarget = null; // Stores {roundIdx, fieldKey}
         let wakeLock = null; // Screen Wake Lock handle
-        const EDITABLE_FIELDS = ['startTime', 'qtrDur', 'q1Brk', 'q2Brk', 'q3Brk', 'interBrk'];
+        let periodMode = 4; // 4 or 2 periods
+        let EDITABLE_FIELDS = [];
         const STORAGE_KEY = 'netball_timer_schedule';
+        const MODE_STORAGE_KEY = 'netball_timer_mode';
 
-        const DEFAULTS = {
-            startTime: "09:00",
-            qtrDur: "07:00",
-            q1Brk: "01:00",
-            q2Brk: "02:00",
-            q3Brk: "01:00",
-            interBrk: "2:00"
+        const DEFAULTS_4Q = {
+            startTime: "09:00", periodDur: "07:00", b1: "01:00", b2: "02:00", b3: "01:00", interBrk: "2:00"
+        };
+        const DEFAULTS_2H = {
+            startTime: "09:00", periodDur: "15:00", b1: "03:00", b2: "00:00", b3: "00:00", interBrk: "2:00"
         };
 
+        function getDefaults() { return periodMode === 4 ? DEFAULTS_4Q : DEFAULTS_2H; }
+
         function init() {
+            const savedMode = localStorage.getItem(MODE_STORAGE_KEY);
+            if (savedMode) periodMode = parseInt(savedMode, 10);
+            document.getElementById('periodSelect').value = periodMode;
+
+            updateEditableFields();
             loadSchedule();
             if (rounds.length === 0) {
                 addRound();
@@ -224,7 +212,17 @@
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
-                    rounds = JSON.parse(saved);
+                    const parsed = JSON.parse(saved);
+                    // Handle migration of old property names if necessary
+                    rounds = parsed.map(r => ({
+                        id: r.id,
+                        startTime: r.startTime,
+                        periodDur: r.periodDur || r.qtrDur || getDefaults().periodDur,
+                        b1: r.b1 || r.q1Brk || getDefaults().b1,
+                        b2: r.b2 || r.q2Brk || getDefaults().b2,
+                        b3: r.b3 || r.q3Brk || getDefaults().b3,
+                        interBrk: r.interBrk || getDefaults().interBrk
+                    }));
                     recalculateAll();
                 } catch (e) {
                     console.error("Failed to load schedule", e);
@@ -239,6 +237,34 @@
                 localStorage.removeItem(STORAGE_KEY);
                 addRound();
             }
+        }
+
+        function updateEditableFields() {
+            if (periodMode === 4) {
+                EDITABLE_FIELDS = ['startTime', 'periodDur', 'b1', 'b2', 'b3', 'interBrk'];
+            } else {
+                EDITABLE_FIELDS = ['startTime', 'periodDur', 'b1', 'interBrk'];
+            }
+        }
+
+        function handlePeriodChange() {
+            const select = document.getElementById('periodSelect');
+            const newMode = parseInt(select.value, 10);
+            
+            if (rounds.length > 0) {
+                if (!confirm("Changing the number of periods will clear the current schedule. Proceed?")) {
+                    select.value = periodMode; // Revert selection
+                    return;
+                }
+            }
+            
+            periodMode = newMode;
+            localStorage.setItem(MODE_STORAGE_KEY, periodMode);
+            updateEditableFields();
+            
+            rounds = [];
+            localStorage.removeItem(STORAGE_KEY);
+            addRound();
         }
 
         function tick() {
@@ -264,16 +290,27 @@
 
             for (let i = 0; i < rounds.length; i++) {
                 const round = rounds[i];
-                const timeline = [
-                    { n: `R${round.id} Q1`, t: round.s1, type: 'start', field: 's1' },
-                    { n: `R${round.id} End Q1`, t: round.e1, type: 'end', field: 'e1' },
-                    { n: `R${round.id} Q2`, t: round.s2, type: 'start', field: 's2' },
-                    { n: `R${round.id} End Q2`, t: round.e2, type: 'end', field: 'e2' },
-                    { n: `R${round.id} Q3`, t: round.s3, type: 'start', field: 's3' },
-                    { n: `R${round.id} End Q3`, t: round.e3, type: 'end', field: 'e3' },
-                    { n: `R${round.id} Q4`, t: round.s4, type: 'start', field: 's4' },
-                    { n: `R${round.id} End Q4`, t: round.e4, type: 'end', field: 'e4' }
-                ];
+                let timeline = [];
+                
+                if (periodMode === 4) {
+                    timeline = [
+                        { n: `R${round.id} Q1`, t: round.s1, type: 'start', field: 's1' },
+                        { n: `R${round.id} End Q1`, t: round.e1, type: 'end', field: 'e1' },
+                        { n: `R${round.id} Q2`, t: round.s2, type: 'start', field: 's2' },
+                        { n: `R${round.id} End Q2`, t: round.e2, type: 'end', field: 'e2' },
+                        { n: `R${round.id} Q3`, t: round.s3, type: 'start', field: 's3' },
+                        { n: `R${round.id} End Q3`, t: round.e3, type: 'end', field: 'e3' },
+                        { n: `R${round.id} Q4`, t: round.s4, type: 'start', field: 's4' },
+                        { n: `R${round.id} End Q4`, t: round.e4, type: 'end', field: 'e4' }
+                    ];
+                } else {
+                    timeline = [
+                        { n: `R${round.id} H1`, t: round.s1, type: 'start', field: 's1' },
+                        { n: `R${round.id} End H1`, t: round.e1, type: 'end', field: 'e1' },
+                        { n: `R${round.id} H2`, t: round.s2, type: 'start', field: 's2' },
+                        { n: `R${round.id} End H2`, t: round.e2, type: 'end', field: 'e2' }
+                    ];
+                }
 
                 for (let ev of timeline) {
                     const evSec = timeToSeconds(ev.t);
@@ -303,27 +340,29 @@
         }
 
         function addRound() {
-            let start = DEFAULTS.startTime;
-            let qtrDur = DEFAULTS.qtrDur;
-            let q1Brk = DEFAULTS.q1Brk;
-            let q2Brk = DEFAULTS.q2Brk;
-            let q3Brk = DEFAULTS.q3Brk;
-            let interBrk = DEFAULTS.interBrk;
+            const def = getDefaults();
+            let start = def.startTime;
+            let periodDur = def.periodDur;
+            let b1 = def.b1;
+            let b2 = def.b2;
+            let b3 = def.b3;
+            let interBrk = def.interBrk;
 
             if (rounds.length > 0) {
                 const last = rounds[rounds.length - 1];
-                start = secondsToTime(timeToSeconds(last.e4) + durToSeconds(last.interBrk));
-                qtrDur = last.qtrDur;
-                q1Brk = last.q1Brk;
-                q2Brk = last.q2Brk;
-                q3Brk = last.q3Brk;
+                const lastEnd = periodMode === 4 ? last.e4 : last.e2;
+                start = secondsToTime(timeToSeconds(lastEnd) + durToSeconds(last.interBrk));
+                periodDur = last.periodDur;
+                b1 = last.b1;
+                b2 = last.b2;
+                b3 = last.b3;
                 interBrk = last.interBrk;
             }
 
             rounds.push({ 
                 id: rounds.length + 1, 
                 startTime: start, 
-                qtrDur, q1Brk, q2Brk, q3Brk, interBrk 
+                periodDur, b1, b2, b3, interBrk 
             });
             recalculateAll();
         }
@@ -332,28 +371,95 @@
             rounds.forEach((r, i) => {
                 if (i > 0) {
                     const prev = rounds[i-1];
-                    r.startTime = secondsToTime(timeToSeconds(prev.e4) + durToSeconds(prev.interBrk));
+                    const prevEnd = periodMode === 4 ? prev.e4 : prev.e2;
+                    r.startTime = secondsToTime(timeToSeconds(prevEnd) + durToSeconds(prev.interBrk));
                 }
                 const s1 = timeToSeconds(r.startTime);
-                const d = durToSeconds(r.qtrDur);
-                const b1 = durToSeconds(r.q1Brk);
-                const b2 = durToSeconds(r.q2Brk);
-                const b3 = durToSeconds(r.q3Brk);
+                const d = durToSeconds(r.periodDur);
+                const brk1 = durToSeconds(r.b1);
+                const brk2 = periodMode === 4 ? durToSeconds(r.b2) : 0;
+                const brk3 = periodMode === 4 ? durToSeconds(r.b3) : 0;
 
                 r.s1 = secondsToTime(s1);
                 r.e1 = secondsToTime(s1 + d);
-                r.s2 = secondsToTime(s1 + d + b1);
-                r.e2 = secondsToTime(s1 + d*2 + b1);
-                r.s3 = secondsToTime(s1 + d*2 + b1 + b2);
-                r.e3 = secondsToTime(s1 + d*3 + b1 + b2);
-                r.s4 = secondsToTime(s1 + d*3 + b1 + b2 + b3);
-                r.e4 = secondsToTime(s1 + d*4 + b1 + b2 + b3);
+                r.s2 = secondsToTime(s1 + d + brk1);
+                r.e2 = secondsToTime(s1 + d*2 + brk1);
+                
+                if (periodMode === 4) {
+                    r.s3 = secondsToTime(s1 + d*2 + brk1 + brk2);
+                    r.e3 = secondsToTime(s1 + d*3 + brk1 + brk2);
+                    r.s4 = secondsToTime(s1 + d*3 + brk1 + brk2 + brk3);
+                    r.e4 = secondsToTime(s1 + d*4 + brk1 + brk2 + brk3);
+                }
             });
             saveSchedule();
             render();
         }
 
         function render() {
+            const thead = document.querySelector('#roundTable thead');
+            if (periodMode === 4) {
+                thead.innerHTML = `
+                    <tr>
+                        <th>Round #</th>
+                        <th>Start Time</th>
+                        <th>Qtr Duration</th>
+                        <th>Q1 Break</th>
+                        <th>Q2 Break</th>
+                        <th>Q3 Break</th>
+                        <th>Interval</th>
+                        <th>Start Q1</th>
+                        <th>End Q1</th>
+                        <th>Start Q2</th>
+                        <th>End Q2</th>
+                        <th>Start Q3</th>
+                        <th>End Q3</th>
+                        <th>Start Q4</th>
+                        <th>End Q4</th>
+                        <th></th>
+                    </tr>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <tr>
+                        <th>Round #</th>
+                        <th>Start Time</th>
+                        <th>Half Duration</th>
+                        <th>Half Break</th>
+                        <th>Interval</th>
+                        <th>Start H1</th>
+                        <th>End H1</th>
+                        <th>Start H2</th>
+                        <th>End H2</th>
+                        <th></th>
+                    </tr>
+                `;
+            }
+
+            let styleTag = document.getElementById('dynamic-table-styles');
+            if (!styleTag) {
+                styleTag = document.createElement('style');
+                styleTag.id = 'dynamic-table-styles';
+                document.head.appendChild(styleTag);
+            }
+            if (periodMode === 4) {
+                styleTag.innerHTML = `
+                    th:nth-child(1) { width: 40px; }
+                    th:nth-child(n+2):nth-child(-n+7) { width: 85px; } /* Editable columns */
+                    th:nth-child(n+8):nth-child(-n+15) { width: 70px; } /* Calculated columns */
+                    th:nth-child(16) { width: 50px; }
+                    table { min-width: 1200px; }
+                `;
+            } else {
+                styleTag.innerHTML = `
+                    th:nth-child(1) { width: 40px; }
+                    th:nth-child(n+2):nth-child(-n+5) { width: 85px; } /* Editable columns */
+                    th:nth-child(n+6):nth-child(-n+9) { width: 70px; } /* Calculated columns */
+                    th:nth-child(10) { width: 50px; }
+                    table { min-width: 800px; }
+                `;
+            }
+
             const body = document.getElementById('tableBody');
             body.innerHTML = rounds.map((r, i) => {
                 const isTargetRow = nextEventTarget && nextEventTarget.roundIdx === i;
@@ -362,21 +468,26 @@
                     return (isTargetRow && nextEventTarget.field === field) ? 'next-event-highlight' : '';
                 };
 
-                return `
-                <tr>
-                    <td>${r.id}</td>
-                    ${EDITABLE_FIELDS.map(f => `<td class="editable" onclick="edit(${i}, '${f}')" data-idx="${i}" data-field="${f}">${r[f]}</td>`).join('')}
-                    <td class="calculated ${getHighlightClass('s1')}">${r.s1}</td>
-                    <td class="calculated ${getHighlightClass('e1')}">${r.e1}</td>
-                    <td class="calculated ${getHighlightClass('s2')}">${r.s2}</td>
-                    <td class="calculated ${getHighlightClass('e2')}">${r.e2}</td>
-                    <td class="calculated ${getHighlightClass('s3')}">${r.s3}</td>
-                    <td class="calculated ${getHighlightClass('e3')}">${r.e3}</td>
-                    <td class="calculated ${getHighlightClass('s4')}">${r.s4}</td>
-                    <td class="calculated ${getHighlightClass('e4')}">${r.e4}</td>
-                    <td><button class="btn btn-link text-danger p-0" onclick="del(${i})"><i data-lucide="x-circle"></i></button></td>
-                </tr>
-            `}).join('');
+                let rowHtml = `<tr><td>${r.id}</td>`;
+                EDITABLE_FIELDS.forEach(f => {
+                    rowHtml += `<td class="editable" onclick="edit(${i}, '${f}')" data-idx="${i}" data-field="${f}">${r[f]}</td>`;
+                });
+
+                rowHtml += `<td class="calculated ${getHighlightClass('s1')}">${r.s1}</td>`;
+                rowHtml += `<td class="calculated ${getHighlightClass('e1')}">${r.e1}</td>`;
+                rowHtml += `<td class="calculated ${getHighlightClass('s2')}">${r.s2}</td>`;
+                rowHtml += `<td class="calculated ${getHighlightClass('e2')}">${r.e2}</td>`;
+
+                if (periodMode === 4) {
+                    rowHtml += `<td class="calculated ${getHighlightClass('s3')}">${r.s3}</td>`;
+                    rowHtml += `<td class="calculated ${getHighlightClass('e3')}">${r.e3}</td>`;
+                    rowHtml += `<td class="calculated ${getHighlightClass('s4')}">${r.s4}</td>`;
+                    rowHtml += `<td class="calculated ${getHighlightClass('e4')}">${r.e4}</td>`;
+                }
+
+                rowHtml += `<td><button class="btn btn-link text-danger p-0" onclick="del(${i})"><i data-lucide="x-circle"></i></button></td></tr>`;
+                return rowHtml;
+            }).join('');
             lucide.createIcons();
         }
 
@@ -468,11 +579,13 @@
         
         function startTimer() { 
             isRunning = true; 
+            document.getElementById('periodSelect').disabled = true;
             requestWakeLock();
         }
 
         function stopTimer() { 
             isRunning = false; 
+            document.getElementById('periodSelect').disabled = false;
             nextEventTarget = null;
             releaseWakeLock();
             render();
