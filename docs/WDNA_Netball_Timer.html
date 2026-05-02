@@ -296,18 +296,18 @@
                     timeline = [
                         { n: `R${round.id} Q1`, t: round.s1, type: 'start', field: 's1' },
                         { n: `R${round.id} End Q1`, t: round.e1, type: 'end', field: 'e1' },
-                        { n: `R${round.id} Q2`, t: round.s2, type: 'start', field: 's2' },
+                        { n: `R${round.id} Q2`, t: round.s2, type: durToSeconds(round.b1) > 0 ? 'start' : 'skip', field: 's2' },
                         { n: `R${round.id} End Q2`, t: round.e2, type: 'end', field: 'e2' },
-                        { n: `R${round.id} Q3`, t: round.s3, type: 'start', field: 's3' },
+                        { n: `R${round.id} Q3`, t: round.s3, type: durToSeconds(round.b2) > 0 ? 'start' : 'skip', field: 's3' },
                         { n: `R${round.id} End Q3`, t: round.e3, type: 'end', field: 'e3' },
-                        { n: `R${round.id} Q4`, t: round.s4, type: 'start', field: 's4' },
+                        { n: `R${round.id} Q4`, t: round.s4, type: durToSeconds(round.b3) > 0 ? 'start' : 'skip', field: 's4' },
                         { n: `R${round.id} End Q4`, t: round.e4, type: 'end', field: 'e4' }
                     ];
                 } else {
                     timeline = [
                         { n: `R${round.id} H1`, t: round.s1, type: 'start', field: 's1' },
                         { n: `R${round.id} End H1`, t: round.e1, type: 'end', field: 'e1' },
-                        { n: `R${round.id} H2`, t: round.s2, type: 'start', field: 's2' },
+                        { n: `R${round.id} H2`, t: round.s2, type: durToSeconds(round.b1) > 0 ? 'start' : 'skip', field: 's2' },
                         { n: `R${round.id} End H2`, t: round.e2, type: 'end', field: 'e2' }
                     ];
                 }
@@ -317,7 +317,7 @@
                     const diff = evSec - currentSeconds;
                     
                     if (diff === 30 && ev.type === 'start') playSound('sndWarning');
-                    if (diff === 0) playSound(ev.type === 'start' ? 'sndStart' : 'sndEnd');
+                    if (diff === 0 && ev.type !== 'skip') playSound(ev.type === 'start' ? 'sndStart' : 'sndEnd');
                     
                     if (diff > 0) {
                         nextEvent = { name: ev.n, diff: diff };
