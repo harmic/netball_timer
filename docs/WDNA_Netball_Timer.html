@@ -380,16 +380,16 @@
                 const brk2 = periodMode === 4 ? durToSeconds(r.b2) : 0;
                 const brk3 = periodMode === 4 ? durToSeconds(r.b3) : 0;
 
-                r.s1 = secondsToTime(s1);
-                r.e1 = secondsToTime(s1 + d);
-                r.s2 = secondsToTime(s1 + d + brk1);
-                r.e2 = secondsToTime(s1 + d*2 + brk1);
+                r.s1 = secondsToTimeHMS(s1);
+                r.e1 = secondsToTimeHMS(s1 + d);
+                r.s2 = secondsToTimeHMS(s1 + d + brk1);
+                r.e2 = secondsToTimeHMS(s1 + d*2 + brk1);
                 
                 if (periodMode === 4) {
-                    r.s3 = secondsToTime(s1 + d*2 + brk1 + brk2);
-                    r.e3 = secondsToTime(s1 + d*3 + brk1 + brk2);
-                    r.s4 = secondsToTime(s1 + d*3 + brk1 + brk2 + brk3);
-                    r.e4 = secondsToTime(s1 + d*4 + brk1 + brk2 + brk3);
+                    r.s3 = secondsToTimeHMS(s1 + d*2 + brk1 + brk2);
+                    r.e3 = secondsToTimeHMS(s1 + d*3 + brk1 + brk2);
+                    r.s4 = secondsToTimeHMS(s1 + d*3 + brk1 + brk2 + brk3);
+                    r.e4 = secondsToTimeHMS(s1 + d*4 + brk1 + brk2 + brk3);
                 }
             });
             saveSchedule();
@@ -501,6 +501,8 @@
             input.select();
 
             const saveAndExit = () => {
+                if (saveAndExit.done) return;
+                saveAndExit.done = true;
                 const newVal = formatInput(input.value, field);
                 rounds[idx][field] = newVal;
                 recalculateAll();
@@ -560,12 +562,18 @@
             return v;
         }
 
-        function timeToSeconds(t) { const [h, m] = t.split(':').map(Number); return h*3600 + m*60; }
+        function timeToSeconds(t) { const p = t.split(':').map(Number); return p[0]*3600 + p[1]*60 + (p[2]||0); }
         function durToSeconds(d) { const [m, s] = d.split(':').map(Number); return m*60 + (s||0); }
         function secondsToTime(s) { 
             const h = Math.floor(s/3600) % 24; 
             const m = Math.floor((s%3600)/60); 
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+        function secondsToTimeHMS(s) {
+            const h = Math.floor(s/3600) % 24;
+            const m = Math.floor((s%3600)/60);
+            const sec = s % 60;
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
         }
         function formatDuration(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
         
