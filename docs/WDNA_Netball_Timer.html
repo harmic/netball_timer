@@ -120,6 +120,12 @@
             <option value="4et">4 Quarters w/ Extra Time</option>
             <option value="2">2 Halves</option>
         </select>
+        <select id="buzzerSelect" class="form-select w-auto" onchange="handleBuzzerChange()">
+            <option value="buzzer1.mp3">Buzzer 1</option>
+            <option value="buzzer2.mp3">Buzzer 2</option>
+            <option value="siren2.mp3">Siren 2</option>
+            <option value="siren.mp3" selected>Siren</option>
+        </select>
         <button class="btn btn-siren" onclick="manualSiren()">Siren</button>
     </nav>
 
@@ -186,9 +192,11 @@
         let nextEventTarget = null; // Stores {roundIdx, fieldKey}
         let wakeLock = null; // Screen Wake Lock handle
         let periodMode = '4'; // '4', '4et', or '2'
+        let buzzerTone = 'siren.mp3'; // selected buzzer/siren audio file
         let EDITABLE_FIELDS = [];
         const STORAGE_KEY = 'netball_timer_schedule';
         const MODE_STORAGE_KEY = 'netball_timer_mode';
+        const BUZZER_STORAGE_KEY = 'netball_timer_buzzer';
 
         const DEFAULTS_4Q = {
             startTime: "09:00", periodDur: "07:00", b1: "01:00", b2: "02:00", b3: "01:00", interBrk: "2:00"
@@ -210,6 +218,11 @@
             const savedMode = localStorage.getItem(MODE_STORAGE_KEY);
             if (savedMode) periodMode = savedMode;
             document.getElementById('periodSelect').value = periodMode;
+
+            const savedBuzzer = localStorage.getItem(BUZZER_STORAGE_KEY);
+            if (savedBuzzer) buzzerTone = savedBuzzer;
+            document.getElementById('buzzerSelect').value = buzzerTone;
+            document.getElementById('sndSiren').src = buzzerTone;
 
             updateEditableFields();
             loadSchedule();
@@ -325,6 +338,13 @@
             rounds = [];
             localStorage.removeItem(STORAGE_KEY);
             addRound();
+        }
+
+        function handleBuzzerChange() {
+            const select = document.getElementById('buzzerSelect');
+            buzzerTone = select.value;
+            localStorage.setItem(BUZZER_STORAGE_KEY, buzzerTone);
+            document.getElementById('sndSiren').src = buzzerTone;
         }
 
         function tick() {
