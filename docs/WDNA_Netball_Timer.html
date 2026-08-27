@@ -127,6 +127,7 @@
             <option value="siren.mp3" selected>Siren</option>
         </select>
         <button class="btn btn-siren" onclick="manualSiren()">Siren</button>
+        <button class="btn btn-outline-secondary" onclick="playSound('sndTestTone')">Test Tone</button>
     </nav>
 
     <div class="status-bar" id="statusBar">
@@ -185,6 +186,7 @@
     <audio id="sndStart" src="qtr_start.mp3"></audio>
     <audio id="sndEnd" src="qtr_end.mp3"></audio>
     <audio id="sndSiren" src="siren.mp3"></audio>
+    <audio id="sndTestTone" src="test-tone.mp3"></audio>
 
     <script>
         let rounds = [];
