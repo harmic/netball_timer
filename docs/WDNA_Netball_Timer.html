@@ -105,9 +105,20 @@
         </div>
         <div class="dropdown">
             <button class="btn btn-outline-dark btn-sm" data-bs-toggle="dropdown"><i data-lucide="settings"></i></button>
-            <ul class="dropdown-menu dropdown-menu-end">
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width: 260px;" data-bs-auto-close="outside">
                 <li><a class="dropdown-item" href="#" onclick="openSaveDialog()">Save ...</a></li>
                 <li><a class="dropdown-item" href="#" onclick="openLoadDialog()">Load ...</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li class="px-3 py-1">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="keepAliveToggle" onchange="handleKeepAliveToggle()">
+                        <label class="form-check-label" for="keepAliveToggle">BT Keep-Alive Noise</label>
+                    </div>
+                </li>
+                <li class="px-3 py-1">
+                    <label for="keepAliveGainSlider" class="form-label small mb-0">Level</label>
+                    <input type="range" class="form-range" id="keepAliveGainSlider" min="0" max="100" step="1" oninput="handleKeepAliveGainChange()">
+                </li>
             </ul>
         </div>
     </header>
@@ -193,6 +204,103 @@
         let isRunning = false;
         let nextEventTarget = null; // Stores {roundIdx, fieldKey}
         let wakeLock = null; // Screen Wake Lock handle
+
+        // --- Bluetooth speaker keep-alive (near-inaudible white noise) ---
+        // Bluetooth PA speakers often go to sleep / disconnect the audio link after a
+        // period of silence. To prevent this while the timer is running, we play a
+        // continuous, extremely quiet white-noise signal through the Web Audio API.
+        // This uses its own audio graph, completely independent of the <audio> elements
+        // used for the siren/announcements, so it can never delay or interfere with them.
+        let keepAliveCtx = null;
+        let keepAliveNode = null;
+        let keepAliveGain = null;
+        const KEEPALIVE_STORAGE_KEY = 'netball_timer_keepalive_enabled';
+        const KEEPALIVE_GAIN_STORAGE_KEY = 'netball_timer_keepalive_gain';
+        const KEEPALIVE_MAX_GAIN = 0.01; // Ceiling for the slider - still very quiet at 100%
+        let keepAliveEnabled = true;
+        let keepAliveGainValue = 0.0015; // Very low level - effectively inaudible, just enough to keep the BT link alive
+
+        function initKeepAliveControls() {
+            const savedEnabled = localStorage.getItem(KEEPALIVE_STORAGE_KEY);
+            keepAliveEnabled = savedEnabled === null ? true : savedEnabled === 'true';
+
+            const savedGain = localStorage.getItem(KEEPALIVE_GAIN_STORAGE_KEY);
+            keepAliveGainValue = savedGain !== null ? parseFloat(savedGain) : 0.0015;
+
+            document.getElementById('keepAliveToggle').checked = keepAliveEnabled;
+            document.getElementById('keepAliveGainSlider').value = Math.round((keepAliveGainValue / KEEPALIVE_MAX_GAIN) * 100);
+        }
+
+        function handleKeepAliveToggle() {
+            keepAliveEnabled = document.getElementById('keepAliveToggle').checked;
+            localStorage.setItem(KEEPALIVE_STORAGE_KEY, keepAliveEnabled);
+
+            if (isRunning) {
+                if (keepAliveEnabled) {
+                    startKeepAliveNoise();
+                } else {
+                    stopKeepAliveNoise();
+                }
+            }
+        }
+
+        function handleKeepAliveGainChange() {
+            const pct = parseFloat(document.getElementById('keepAliveGainSlider').value);
+            keepAliveGainValue = (pct / 100) * KEEPALIVE_MAX_GAIN;
+            localStorage.setItem(KEEPALIVE_GAIN_STORAGE_KEY, keepAliveGainValue);
+
+            if (keepAliveGain) {
+                keepAliveGain.gain.value = keepAliveGainValue;
+            }
+        }
+
+        function startKeepAliveNoise() {
+            if (!keepAliveEnabled) return;
+            if (keepAliveCtx) return; // already running
+            try {
+                keepAliveCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+                // Generate 2 seconds of white noise into a buffer and loop it continuously.
+                const bufferSize = keepAliveCtx.sampleRate * 2;
+                const noiseBuffer = keepAliveCtx.createBuffer(1, bufferSize, keepAliveCtx.sampleRate);
+                const data = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+
+                keepAliveNode = keepAliveCtx.createBufferSource();
+                keepAliveNode.buffer = noiseBuffer;
+                keepAliveNode.loop = true;
+
+                keepAliveGain = keepAliveCtx.createGain();
+                keepAliveGain.gain.value = keepAliveGainValue;
+
+                keepAliveNode.connect(keepAliveGain);
+                keepAliveGain.connect(keepAliveCtx.destination);
+                keepAliveNode.start();
+            } catch (err) {
+                console.error('Failed to start keep-alive noise:', err);
+                keepAliveCtx = null;
+                keepAliveNode = null;
+                keepAliveGain = null;
+            }
+        }
+
+        function stopKeepAliveNoise() {
+            if (keepAliveNode) {
+                try { keepAliveNode.stop(); } catch (e) {}
+                keepAliveNode.disconnect();
+                keepAliveNode = null;
+            }
+            if (keepAliveGain) {
+                keepAliveGain.disconnect();
+                keepAliveGain = null;
+            }
+            if (keepAliveCtx) {
+                keepAliveCtx.close().catch(() => {});
+                keepAliveCtx = null;
+            }
+        }
         let periodMode = '4'; // '4', '4et', or '2'
         let buzzerTone = 'siren.mp3'; // selected buzzer/siren audio file
         let EDITABLE_FIELDS = [];
@@ -225,6 +333,8 @@
             if (savedBuzzer) buzzerTone = savedBuzzer;
             document.getElementById('buzzerSelect').value = buzzerTone;
             document.getElementById('sndSiren').src = buzzerTone;
+
+            initKeepAliveControls();
 
             updateEditableFields();
             loadSchedule();
@@ -759,6 +869,7 @@
             isRunning = true; 
             document.getElementById('periodSelect').disabled = true;
             requestWakeLock();
+            startKeepAliveNoise();
         }
 
         function stopTimer() { 
@@ -766,6 +877,7 @@
             document.getElementById('periodSelect').disabled = false;
             nextEventTarget = null;
             releaseWakeLock();
+            stopKeepAliveNoise();
             render();
         }
 
